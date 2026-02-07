@@ -1,0 +1,140 @@
+// Prisma schema for P2P USDT ↔ INR exchange with escrow
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SellAdStatus {
+  ACTIVE
+  LOCKED
+  SOLD
+  CANCELLED
+}
+
+enum TransactionStatus {
+  PENDING
+  PAYMENT_PENDING
+  PAYMENT_RECEIVED
+  ESCROW_RELEASED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model User {
+  id                Int      @id @default(autoincrement())
+  walletAddress     String   @unique // Primary identifier - MetaMask wallet address
+  clerkId           String?  @unique // Optional for backward compatibility
+  email             String?
+  firstName         String?
+  lastName          String?
+  phone             String?
+  addressLine1      String?
+  addressLine2      String?
+  city              String?
+  state             String?
+  zipCode           String?
+  dateOfBirth       DateTime?
+  gender            String?
+  
+  // Bank account details (required for receiving payments)
+  accountHolderName String?
+  accountNumber     String?
+  ifsc              String?
+  bankName          String?
+  
+  termsAccepted     Boolean  @default(false)
+  privacyAccepted   Boolean  @default(false)
+  marketingAccepted Boolean  @default(false)
+  onboardingComplete Boolean @default(false)
+  razorpay          Razorpay?
+  
+  sellAds           SellAd[]
+  transactionsAsBuyer Transaction[] @relation("Buyer")
+  transactionsAsSeller Transaction[] @relation("Seller")
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@index([walletAddress])
+}
+
+model Razorpay {
+  id            Int      @id @default(autoincrement())
+  contactId     String
+  fundAccountId String
+  userId        Int      @unique
+  user          User     @relation(fields: [userId], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model SellAd {
+  id                String   @id @default(cuid())
+  sellerId          Int      // References User.id (by walletAddress lookup)
+  sellerWallet      String   // Denormalized for quick access
+  
+  // Ad details
+  cryptocurrency    String   @default("USDT") // Only USDT for MVP
+  fiatCurrency      String   @default("INR")
+  price             Decimal  @db.Decimal(10, 2) // Price per USDT in INR
+  totalAmount       Decimal  @db.Decimal(15, 2) // Total USDT amount
+  availableAmount   Decimal  @db.Decimal(15, 2) // Remaining available USDT
+  
+  // Escrow details
+  escrowTxHash      String?  // Transaction hash when USDT was locked
+  escrowContractAddress String? // Escrow contract address
+  
+  status            SellAdStatus @default(ACTIVE)
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  seller            User     @relation(fields: [sellerId], references: [id])
+  transactions      Transaction[]
+  
+  @@index([cryptocurrency, status])
+  @@index([price])
+  @@index([sellerWallet])
+}
+
+model Transaction {
+  id                String   @id @default(cuid())
+  
+  // Participants
+  buyerId            Int
+  sellerId           Int
+  sellAdId           String
+  
+  // Transaction details
+  usdtAmount         Decimal  @db.Decimal(15, 2) // USDT amount
+  inrAmount          Decimal  @db.Decimal(15, 2) // INR amount (price * usdtAmount)
+  
+  // Razorpay details
+  razorpayOrderId   String?  @unique
+  razorpayPaymentId String?
+  razorpaySignature String?
+  
+  // Escrow details
+  escrowReleaseTxHash String? // Transaction hash when USDT was released to buyer
+  
+  status            TransactionStatus @default(PENDING)
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  buyer             User     @relation("Buyer", fields: [buyerId], references: [id])
+  seller            User     @relation("Seller", fields: [sellerId], references: [id])
+  sellAd            SellAd   @relation(fields: [sellAdId], references: [id])
+  
+  @@index([buyerId])
+  @@index([sellerId])
+  @@index([sellAdId])
+  @@index([razorpayOrderId])
+  @@index([status])
+}
