@@ -1,9 +1,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/lib/prisma';
 import { ethers } from 'ethers';
-
-const prisma = new PrismaClient();
 
 // Transfer setup
 const INFURA_API_KEY = process.env.INFURA_API_KEY;
@@ -47,17 +45,50 @@ export async function POST(req: NextRequest) {
     if (!orderId || !amount || !buyerId) {
       return NextResponse.json({ success: false, error: 'Missing required fields' }, { status: 400 });
     }
-    // Find the order
-    const order = await prisma.p2POrder.findUnique({ where: { id: orderId } });
-    if (!order) {
-      return NextResponse.json({ success: false, error: 'Order not found' }, { status: 404 });
+    
+    // Find the sell ad
+    const sellAd = await prisma.sellAd.findUnique({
+      where: { id: orderId }
+    });
+    
+    if (!sellAd) {
+      return NextResponse.json(
+        { success: false, error: 'Sell ad not found' },
+        { status: 404 }
+      );
     }
+    
+    // Check if ad is active or locked
+    if (sellAd.status !== 'ACTIVE' && sellAd.status !== 'LOCKED') {
+      return NextResponse.json(
+        { success: false, error: 'Sell ad is not available for purchase' },
+        { status: 400 }
+      );
+    }
+    
     // Check available amount
-    if (Number(order.availableAmount) < Number(amount)) {
+    if (Number(sellAd.availableAmount) < Number(amount)) {
       return NextResponse.json({ success: false, error: 'Not enough tokens available' }, { status: 400 });
     }
-    // Subtract amount
-    const updatedOrder = await prisma.p2POrder.update({
+    
+    // Get buyer wallet address from DB (buyerId can be clerkId or walletAddress)
+    let buyer = await prisma.user.findUnique({ 
+      where: { clerkId: buyerId } 
+    });
+    
+    // If not found by clerkId, try walletAddress
+    if (!buyer) {
+      buyer = await prisma.user.findUnique({ 
+        where: { walletAddress: buyerId } 
+      });
+    }
+    
+    if (!buyer || !buyer.walletAddress) {
+      return NextResponse.json({ success: false, error: 'Buyer wallet address not found' }, { status: 404 });
+    }
+    
+    // Subtract amount from sell ad
+    const updatedSellAd = await prisma.sellAd.update({
       where: { id: orderId },
       data: {
         availableAmount: {
@@ -66,16 +97,10 @@ export async function POST(req: NextRequest) {
       }
     });
 
-    // Get buyer wallet address from DB
-    const buyer = await prisma.user.findUnique({ where: { clerkId: buyerId } });
-    if (!buyer || !buyer.walletAddress) {
-      return NextResponse.json({ success: false, error: 'Buyer wallet address not found' }, { status: 404 });
-    }
-
     let tx, receipt;
     
     // Handle different cryptocurrencies
-    if (order.cryptocurrency === 'USDC') {
+    if (sellAd.cryptocurrency === 'USDC') {
       // Transfer USDC
       if (!usdcSigner || !usdcContract || !polygonProvider) {
         return NextResponse.json({ success: false, error: 'Server misconfiguration: missing USDC contract.' }, { status: 500 });
@@ -102,7 +127,7 @@ export async function POST(req: NextRequest) {
       } catch (err: any) {
         return NextResponse.json({ success: false, error: err.shortMessage || err.message, details: err.reason || 'USDC transfer failed' }, { status: 500 });
       }
-    } else if (order.cryptocurrency === 'MON') {
+    } else if (sellAd.cryptocurrency === 'MON') {
       // Transfer MON - Use MONAD_PRIVATE_KEY for MON transactions
       if (!MONAD_PRIVATE_KEY || !monadProvider || !PAYMENT_CONTRACT_ADDRESS) {
         return NextResponse.json({ success: false, error: 'Server misconfiguration: missing MON credentials.' }, { status: 500 });
@@ -145,12 +170,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Unsupported cryptocurrency' }, { status: 400 });
     }
 
-    // Optionally: create a transaction record here
+    // Create transaction record
+    const transaction = await prisma.transaction.create({
+      data: {
+        buyerId: buyer.id,
+        sellerId: sellAd.sellerId,
+        sellAdId: sellAd.id,
+        usdtAmount: Number(amount),
+        inrAmount: Number(sellAd.price) * Number(amount),
+        escrowReleaseTxHash: receipt.transactionHash,
+        status: 'COMPLETED'
+      }
+    });
+
     return NextResponse.json({
       success: true,
-      order: updatedOrder,
+      sellAd: updatedSellAd,
+      transaction: {
+        id: transaction.id,
+        status: transaction.status
+      },
       transfer: {
-        type: order.cryptocurrency,
+        type: sellAd.cryptocurrency,
         txHash: receipt.transactionHash,
         amount: amount,
         receiver: buyer.walletAddress,

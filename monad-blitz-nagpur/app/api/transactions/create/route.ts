@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '../../../../lib/prisma';
+import { prisma } from '@/lib/prisma';
 
 // POST - Create transaction when buyer initiates purchase
 // This is called BEFORE Razorpay payment

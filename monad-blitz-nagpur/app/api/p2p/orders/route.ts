@@ -4,25 +4,15 @@ import { prisma } from '@/lib/prisma'
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
-    const type = searchParams.get('type') || 'SELL'
-    const cryptocurrency = searchParams.get('cryptocurrency') || 'USDC'
+    const cryptocurrency = searchParams.get('cryptocurrency') || 'USDT'
     const sortBy = searchParams.get('sortBy') || 'price'
-    const paymentMethod = searchParams.get('paymentMethod')
 
     // Build where clause
     const where: any = {
-      type: type.toUpperCase(),
       cryptocurrency: cryptocurrency.toUpperCase(),
       status: 'ACTIVE',
       availableAmount: {
         gt: 0
-      }
-    }
-
-    // Add payment method filter if specified
-    if (paymentMethod && paymentMethod !== 'All payment methods') {
-      where.paymentMethods = {
-        has: paymentMethod.toUpperCase()
       }
     }
 
@@ -32,9 +22,6 @@ export async function GET(request: NextRequest) {
       case 'Price':
         orderBy = { price: 'asc' }
         break
-      case 'Completion Rate':
-        orderBy = { completionRate: 'desc' }
-        break
       case 'Amount':
         orderBy = { availableAmount: 'desc' }
         break
@@ -42,53 +29,35 @@ export async function GET(request: NextRequest) {
         orderBy = { price: 'asc' }
     }
 
-    const orders = await prisma.p2POrder.findMany({
+    const sellAds = await prisma.sellAd.findMany({
       where,
       orderBy,
-      take: 50, // Limit to 50 orders
-      select: {
-        id: true,
-        userId: true,
-        type: true,
-        cryptocurrency: true,
-        fiatCurrency: true,
-        price: true,
-        totalAmount: true,
-        availableAmount: true,
-        minLimit: true,
-        maxLimit: true,
-        paymentMethods: true,
-        timeLimit: true,
-        completionRate: true,
-        totalOrders: true,
-        verified: true,
-        rating: true,
-        createdAt: true
+      take: 50, // Limit to 50 sell ads
+      include: {
+        seller: {
+          select: {
+            walletAddress: true,
+            accountHolderName: true
+          }
+        }
       }
     })
 
     // Transform the data to match the frontend format
-    const transformedOrders = orders.map(order => ({
-      id: order.id,
+    const transformedOrders = sellAds.map(ad => ({
+      id: ad.id,
       trader: {
-        name: `User${order.userId.slice(-4)}`, // Show last 4 chars of userId for privacy
-        completion: `${order.completionRate.toFixed(2)}%`,
-        orders: order.totalOrders,
-        verified: order.verified,
-        rating: parseFloat(order.rating.toString())
+        name: ad.seller.accountHolderName || `User${ad.sellerWallet.slice(-4)}`,
+        completion: '100%', // Default for MVP
+        orders: 0, // Default for MVP
+        verified: false, // Default for MVP
+        rating: 5.0 // Default for MVP
       },
-      price: `₹${order.price.toFixed(2)}`,
-      available: `${order.availableAmount.toFixed(2)} ${order.cryptocurrency}`,
-      limits: `₹${order.minLimit.toFixed(2)} - ₹${order.maxLimit.toFixed(2)}`,
-      paymentMethods: order.paymentMethods.map(method => {
-        switch (method) {
-          case 'UPI': return 'UPI'
-          case 'IMPS': return 'IMPS'
-          case 'BANK_TRANSFER': return 'Bank Transfer (India)'
-          default: return method
-        }
-      }),
-      timeLimit: `${order.timeLimit} min`
+      price: `₹${ad.price.toFixed(2)}`,
+      available: `${ad.availableAmount.toFixed(2)} ${ad.cryptocurrency}`,
+      limits: `₹${(ad.price * 0.1).toFixed(2)} - ₹${(ad.price * ad.availableAmount).toFixed(2)}`, // Min 10% of available
+      paymentMethods: ['UPI', 'IMPS', 'Bank Transfer'], // Default payment methods
+      timeLimit: '30 min' // Default time limit
     }))
 
     return NextResponse.json({
@@ -96,9 +65,9 @@ export async function GET(request: NextRequest) {
       orders: transformedOrders
     })
   } catch (error) {
-    console.error('Error fetching P2P orders:', error)
+    console.error('Error fetching sell ads:', error)
     return NextResponse.json(
-      { success: false, error: 'Failed to fetch orders' },
+      { success: false, error: 'Failed to fetch sell ads' },
       { status: 500 }
     )
   }
@@ -107,50 +76,83 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-      const {
-      cryptocurrency,
+    const {
+      walletAddress,
+      cryptocurrency = 'USDT',
       price,
-      totalAmount
+      totalAmount,
+      escrowTxHash
     } = body
 
     // Validation
-    if (!cryptocurrency || !price || !totalAmount) {
+    if (!walletAddress || !price || !totalAmount) {
       return NextResponse.json(
-        { success: false, error: 'Missing required fields' },
+        { success: false, error: 'Missing required fields: walletAddress, price, totalAmount' },
         { status: 400 }
       )
-    }// For now, we'll use a sample user ID - in production, get this from auth
-    const userId = 'user_' + Date.now()
+    }
 
-    const newOrder = await prisma.p2POrder.create({
+    if (!escrowTxHash) {
+      return NextResponse.json(
+        { success: false, error: 'Escrow transaction hash is required. Please lock USDT first.' },
+        { status: 400 }
+      )
+    }
+
+    // Validate wallet address format
+    if (!/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
+      return NextResponse.json(
+        { success: false, error: 'Invalid wallet address format' },
+        { status: 400 }
+      )
+    }
+
+    // Find or create user
+    let user = await prisma.user.findUnique({
+      where: { walletAddress }
+    })
+
+    if (!user) {
+      user = await prisma.user.create({
+        data: {
+          walletAddress,
+          onboardingComplete: false,
+        }
+      })
+    }
+
+    // Create sell ad
+    const newSellAd = await prisma.sellAd.create({
       data: {
-        userId,
-        type: 'SELL', // Always SELL for this form
+        sellerId: user.id,
+        sellerWallet: walletAddress,
         cryptocurrency: cryptocurrency.toUpperCase(),
         fiatCurrency: 'INR',
-        price,
-        totalAmount,        availableAmount: totalAmount, // Initially all amount is available
-        minLimit: 0, // Default minimum limit
-        maxLimit: totalAmount * price, // Default maximum limit based on total available
-        paymentMethods: ['UPI', 'IMPS'], // Default payment methods
-        timeLimit: 30, // Default 30 minutes
-        status: 'ACTIVE',
-        completionRate: 95.0, // Default completion rate for new users
-        totalOrders: 0,
-        verified: false,
-        rating: 4.5 // Default rating for new users
+        price: parseFloat(price),
+        totalAmount: parseFloat(totalAmount),
+        availableAmount: parseFloat(totalAmount),
+        escrowTxHash,
+        escrowContractAddress: process.env.NEXT_PUBLIC_ESCROW_CONTRACT_ADDRESS || null,
+        status: 'LOCKED' // Ad is locked with escrow
       }
     })
 
     return NextResponse.json({
       success: true,
-      order: newOrder
+      order: {
+        id: newSellAd.id,
+        price: newSellAd.price,
+        totalAmount: newSellAd.totalAmount,
+        availableAmount: newSellAd.availableAmount,
+        status: newSellAd.status,
+        escrowTxHash: newSellAd.escrowTxHash
+      }
     })
 
-  } catch (error) {
-    console.error('Error creating P2P order:', error)
+  } catch (error: any) {
+    console.error('Error creating sell ad:', error)
     return NextResponse.json(
-      { success: false, error: 'Failed to create order' },
+      { success: false, error: error.message || 'Failed to create sell ad' },
       { status: 500 }
     )
   }

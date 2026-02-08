@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '../../../../lib/prisma';
+import { prisma } from '@/lib/prisma';
 
 // Helper to create Razorpay contact
 async function createRazorpayContact({ name, email, contact }: { name: string, email?: string, contact: string }) {
