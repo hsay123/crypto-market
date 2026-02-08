@@ -1,61 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { prisma } from '@/lib/prisma';
-import { ethers } from 'ethers';
 
-// USDT and Escrow contract addresses
-const USDT_CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_USDT_CONTRACT_ADDRESS || '0x...';
-const ESCROW_CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_ESCROW_CONTRACT_ADDRESS || '0x...';
-const PRIVATE_KEY = process.env.PRIVATE_KEY; // Server's private key for escrow release
-
-// ERC20 ABI
-const ERC20_ABI = [
-  "function transfer(address to, uint256 amount) returns (bool)"
-];
-
-// Escrow contract ABI
-const ESCROW_ABI = [
-  "function releaseTokens(string memory adId, address buyer, address token, uint256 amount) external"
-];
-
-// Get provider for Polygon Amoy
-function getProvider() {
-  const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'https://rpc-amoy.polygon.technology/';
-  return new ethers.JsonRpcProvider(rpcUrl, {
-    chainId: 80002,
-    name: 'polygon-amoy'
-  });
-}
-
-// Release USDT from escrow to buyer
-async function releaseEscrow(adId: string, buyerAddress: string, usdtAmount: string) {
-  if (!PRIVATE_KEY || !ESCROW_CONTRACT_ADDRESS) {
-    throw new Error('Escrow configuration missing: PRIVATE_KEY or ESCROW_CONTRACT_ADDRESS not set');
-  }
-
-  const provider = getProvider();
-  const signer = new ethers.Wallet(PRIVATE_KEY, provider);
-  const escrowContract = new ethers.Contract(ESCROW_CONTRACT_ADDRESS, ESCROW_ABI, signer);
-
-  // USDT has 6 decimals
-  const amountInWei = ethers.parseUnits(usdtAmount, 6);
-
-  // Call releaseTokens on escrow contract
-  const tx = await escrowContract.releaseTokens(adId, buyerAddress, USDT_CONTRACT_ADDRESS, amountInWei);
-  const receipt = await tx.wait();
-
-  if (!receipt || receipt.status !== 1) {
-    throw new Error('Escrow release transaction failed');
-  }
-
-  return receipt.transactionHash;
-}
-
-// This endpoint receives payment webhooks from Razorpay
+/**
+ * POST /api/razorpay/webhook
+ * 
+ * Handles Razorpay webhook events for payment status updates.
+ * 
+ * Events handled:
+ * - payment.captured: Payment successful, update transaction and set escrow placeholder
+ * - payment.failed: Payment failed, update transaction status
+ * 
+ * IMPORTANT: Escrow release is a PLACEHOLDER for hackathon demo.
+ * Real blockchain escrow execution will be implemented post-hackathon on Monad.
+ */
 export async function POST(request: NextRequest) {
 	try {
-		const secret = process.env.RAZORPAY_KEY_SECRET || process.env.key_secret;
+		// Use RAZORPAY_WEBHOOK_SECRET if available, fallback to RAZORPAY_KEY_SECRET
+		const secret = process.env.RAZORPAY_WEBHOOK_SECRET || process.env.RAZORPAY_KEY_SECRET || '';
 		if (!secret) {
+			console.error('Webhook secret not configured');
 			return NextResponse.json({ error: 'Webhook secret not set' }, { status: 500 });
 		}
 
@@ -75,14 +39,17 @@ export async function POST(request: NextRequest) {
 			return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
 		}
 
-		// Verify signature
+		// Verify webhook signature
 		const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
 		if (expected !== signature) {
+			console.error('Webhook signature verification failed');
 			return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
 		}
 
-		// Handle payment.paid event
-		if (payload.event === 'payment.captured' || payload.event === 'payment.authorized') {
+		console.log(`📥 Razorpay webhook received: ${payload.event}`);
+
+		// Handle payment.captured event (payment successful)
+		if (payload.event === 'payment.captured') {
 			const payment = payload.payload?.payment?.entity;
 			if (!payment) {
 				return NextResponse.json({ error: 'Invalid payment data' }, { status: 400 });
@@ -93,9 +60,9 @@ export async function POST(request: NextRequest) {
 			const amount = payment.amount; // Amount in paise
 			const status = payment.status;
 
-			// Only process if payment is captured/authorized
-			if (status !== 'captured' && status !== 'authorized') {
-				console.log(`Payment ${razorpayPaymentId} status is ${status}, skipping escrow release`);
+			// Only process if payment is captured
+			if (status !== 'captured') {
+				console.log(`Payment ${razorpayPaymentId} status is ${status}, skipping`);
 				return NextResponse.json({ received: true, message: 'Payment not captured yet' });
 			}
 
@@ -137,66 +104,85 @@ export async function POST(request: NextRequest) {
 				}
 			});
 
-			// Release USDT from escrow to buyer
-			try {
-				const releaseTxHash = await releaseEscrow(
-					transaction.sellAdId,
-					transaction.buyer.walletAddress,
-					transaction.usdtAmount.toString()
-				);
+			// ============================================
+			// ESCROW PLACEHOLDER FOR HACKATHON DEMO
+			// ============================================
+			// NOTE: Real blockchain escrow execution will be implemented post-hackathon.
+			// For now, we simulate escrow release with a placeholder transaction hash.
+			// This allows the payment flow to complete and demonstrate the full system.
+			// 
+			// Post-hackathon: Replace this with actual releaseEscrow() call to Monad testnet.
+			// ============================================
+			
+			const placeholderTxHash = `0xRAZORPAY_DEMO_${transaction.id}_${Date.now()}`;
+			
+			console.log(`🔒 ESCROW PLACEHOLDER: Simulating escrow release for transaction ${transaction.id}`);
+			console.log(`   Placeholder TX Hash: ${placeholderTxHash}`);
+			console.log(`   Real escrow execution will be on Monad testnet post-hackathon`);
 
-				// Update transaction and sell ad
-				await prisma.$transaction([
-					prisma.transaction.update({
-						where: { id: transaction.id },
-						data: {
-							escrowReleaseTxHash: releaseTxHash,
-							status: 'ESCROW_RELEASED'
-						}
-					}),
-					prisma.sellAd.update({
-						where: { id: transaction.sellAdId },
-						data: {
-							availableAmount: {
-								decrement: transaction.usdtAmount
-							}
-						}
-					})
-				]);
-
-				// Mark transaction as completed
-				await prisma.transaction.update({
+			// Update transaction and sell ad with placeholder escrow release
+			await prisma.$transaction([
+				prisma.transaction.update({
 					where: { id: transaction.id },
 					data: {
-						status: 'COMPLETED'
+						escrowReleaseTxHash: placeholderTxHash,
+						status: 'ESCROW_RELEASED' // Changed from COMPLETED to ESCROW_RELEASED for demo
 					}
-				});
+				}),
+				prisma.sellAd.update({
+					where: { id: transaction.sellAdId },
+					data: {
+						availableAmount: {
+							decrement: transaction.usdtAmount
+						}
+					}
+				})
+			]);
 
-				console.log(`Successfully released escrow for transaction ${transaction.id}, tx: ${releaseTxHash}`);
-				return NextResponse.json({ 
-					received: true, 
-					verified: true,
-					message: 'Payment processed and escrow released',
-					releaseTxHash
-				});
-			} catch (error: any) {
-				console.error('Error releasing escrow:', error);
-				// Update transaction status to failed
+			console.log(`✅ Payment processed and escrow placeholder set for transaction ${transaction.id}`);
+			return NextResponse.json({ 
+				received: true, 
+				verified: true,
+				message: 'Payment processed and escrow placeholder set',
+				escrowTxHash: placeholderTxHash,
+				note: 'Real escrow execution will be on Monad testnet post-hackathon'
+			});
+		}
+
+		// Handle payment.failed event
+		if (payload.event === 'payment.failed') {
+			const payment = payload.payload?.payment?.entity;
+			if (!payment) {
+				return NextResponse.json({ error: 'Invalid payment data' }, { status: 400 });
+			}
+
+			const razorpayOrderId = payment.order_id;
+			const razorpayPaymentId = payment.id;
+
+			// Find and update transaction
+			const transaction = await prisma.transaction.findUnique({
+				where: { razorpayOrderId }
+			});
+
+			if (transaction) {
 				await prisma.transaction.update({
 					where: { id: transaction.id },
 					data: {
+						razorpayPaymentId,
 						status: 'FAILED'
 					}
 				});
-				return NextResponse.json({ 
-					error: 'Payment received but escrow release failed',
-					details: error.message 
-				}, { status: 500 });
+				console.log(`❌ Payment failed for transaction ${transaction.id}`);
 			}
+
+			return NextResponse.json({ 
+				received: true, 
+				message: 'Payment failure logged' 
+			});
 		}
 
 		// For other events, just acknowledge
-		console.log('Razorpay webhook event:', payload.event);
+		console.log(`ℹ️  Unhandled Razorpay webhook event: ${payload.event}`);
 		return NextResponse.json({ received: true, verified: true });
 	} catch (error: any) {
 		console.error('Webhook error:', error);

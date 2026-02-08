@@ -5,6 +5,9 @@ import Navbar from "./components/Navbar";
 import { Footer } from "./components/footer";
 import "./globals.css";
 
+// Disable static generation for pages that use Clerk
+export const dynamic = 'force-dynamic';
+
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -25,8 +28,11 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Safe fallback for Clerk publishable key during build
+  const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || '';
+  
   return (
-    <ClerkProvider>
+    <ClerkProvider publishableKey={clerkKey || 'pk_test_placeholder'}>
       <html lang="en">
         <body className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen flex flex-col`}>
           <Navbar />

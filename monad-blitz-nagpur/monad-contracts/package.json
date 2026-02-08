@@ -1,0 +1,24 @@
+{
+  "name": "monad-contracts",
+  "version": "1.0.0",
+  "description": "Smart contracts for Monad testnet deployment",
+  "type": "module",
+  "scripts": {
+    "compile": "hardhat compile",
+    "deploy": "hardhat run scripts/deploy.ts --network monad",
+    "deploy:usdt": "hardhat run scripts/deploy-usdt.ts --network monad",
+    "deploy:usdt:auto": "hardhat run scripts/deploy-and-update.ts --network monad",
+    "setup-env": "bash scripts/setup-env.sh",
+    "test": "hardhat test"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^4.0.4",
+    "@types/node": "^20.0.0",
+    "dotenv": "^17.2.2",
+    "hardhat": "^3.1.7",
+    "typescript": "^5.8.0"
+  },
+  "dependencies": {
+    "ethers": "^6.15.0"
+  }
+}

@@ -47,11 +47,11 @@ export async function POST(req: NextRequest) {
     }
     
     // Find the sell ad
-    const sellAd = await prisma.sellAd.findUnique({
+    const orders= await prisma.sellAd.findUnique({
       where: { id: orderId }
     });
     
-    if (!sellAd) {
+    if (!orders) {
       return NextResponse.json(
         { success: false, error: 'Sell ad not found' },
         { status: 404 }
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
     }
     
     // Check if ad is active or locked
-    if (sellAd.status !== 'ACTIVE' && sellAd.status !== 'LOCKED') {
+    if (orders.status !== 'ACTIVE' && orders.status !== 'LOCKED') {
       return NextResponse.json(
         { success: false, error: 'Sell ad is not available for purchase' },
         { status: 400 }
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
     }
     
     // Check available amount
-    if (Number(sellAd.availableAmount) < Number(amount)) {
+    if (Number(orders.availableAmount) < Number(amount)) {
       return NextResponse.json({ success: false, error: 'Not enough tokens available' }, { status: 400 });
     }
     
@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
     let tx, receipt;
     
     // Handle different cryptocurrencies
-    if (sellAd.cryptocurrency === 'USDC') {
+    if (orders.cryptocurrency === 'USDC') {
       // Transfer USDC
       if (!usdcSigner || !usdcContract || !polygonProvider) {
         return NextResponse.json({ success: false, error: 'Server misconfiguration: missing USDC contract.' }, { status: 500 });
@@ -127,7 +127,7 @@ export async function POST(req: NextRequest) {
       } catch (err: any) {
         return NextResponse.json({ success: false, error: err.shortMessage || err.message, details: err.reason || 'USDC transfer failed' }, { status: 500 });
       }
-    } else if (sellAd.cryptocurrency === 'MON') {
+    } else if (orders.cryptocurrency === 'MON') {
       // Transfer MON - Use MONAD_PRIVATE_KEY for MON transactions
       if (!MONAD_PRIVATE_KEY || !monadProvider || !PAYMENT_CONTRACT_ADDRESS) {
         return NextResponse.json({ success: false, error: 'Server misconfiguration: missing MON credentials.' }, { status: 500 });
@@ -174,10 +174,10 @@ export async function POST(req: NextRequest) {
     const transaction = await prisma.transaction.create({
       data: {
         buyerId: buyer.id,
-        sellerId: sellAd.sellerId,
-        sellAdId: sellAd.id,
+        sellerId: orders.sellerId,
+        sellAdId: orders.id,
         usdtAmount: Number(amount),
-        inrAmount: Number(sellAd.price) * Number(amount),
+        inrAmount: Number(orders.price) * Number(amount),
         escrowReleaseTxHash: receipt.transactionHash,
         status: 'COMPLETED'
       }
@@ -191,7 +191,7 @@ export async function POST(req: NextRequest) {
         status: transaction.status
       },
       transfer: {
-        type: sellAd.cryptocurrency,
+        type: orders.cryptocurrency,
         txHash: receipt.transactionHash,
         amount: amount,
         receiver: buyer.walletAddress,

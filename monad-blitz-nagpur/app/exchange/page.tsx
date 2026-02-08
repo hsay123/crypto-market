@@ -542,80 +542,83 @@ export default function ExchangePage() {
                   return;
                 }
                 setBuyLoading(true);
+                setBuyError("");
+                setBuyMessage("");
                 try {
                   // Calculate fiat amount (price * tokens), convert to paise
                   const totalFiat = Math.round(price * amountNum * 100); // paise
-                  if (isNaN(totalFiat) || totalFiat < 500) {
-                    setBuyError(`Minimum payment is ₹5 (500 paise). Your total: ₹${isNaN(totalFiat) ? '0.00' : (totalFiat/100).toFixed(2)}`);
+                  if (isNaN(totalFiat) || totalFiat < 100) {
+                    setBuyError(`Minimum payment is ₹1 (100 paise). Your total: ₹${isNaN(totalFiat) ? '0.00' : (totalFiat/100).toFixed(2)}`);
                     setBuyLoading(false);
                     return;
                   }
-                  // 1. Create order
-                  const res = await fetch("/api/razorpay/order", {
+
+                  if (!user) {
+                    setBuyError("Please login to continue");
+                    setBuyLoading(false);
+                    return;
+                  }
+
+                  // 1. Create Razorpay order and transaction record
+                  const res = await fetch("/api/razorpay/create-order", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ amount: totalFiat, email: buyerEmail, number: buyerNumber }),
+                    body: JSON.stringify({ 
+                      amount: totalFiat, // Amount in paise
+                      sellAdId: buyOrder.id,
+                      buyerId: user.id // Clerk user ID - backend will find/create User record
+                    }),
                   });
                   const data = await res.json();
                   if (!res.ok) throw new Error(data.error || "Order creation failed");
+
                   // 2. Load Razorpay script
                   await loadRazorpay();
+
                   // 3. Open Razorpay modal
                   const options = {
-                    key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
-                    amount: totalFiat,
-                    currency: "INR",
+                    key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || data.keyId,
+                    amount: data.amount, // Use amount from API response
+                    currency: data.currency || "INR",
                     name: "CryptoBazaar",
                     description: `Buy ${amountNum} ${selectedCrypto}`,
                     order_id: data.orderId,
                     handler: async function (response: any) {
-                      // 4. Verify payment
-                      const verifyRes = await fetch("/api/razorpay/verify", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          orderCreationId: data.orderId,
-                          razorpayPaymentId: response.razorpay_payment_id,
-                          razorpaySignature: response.razorpay_signature,
-                          email: buyerEmail,
-                          number: buyerNumber,
-                          amount: totalFiat,
-                        }),
-                      });
-                      const verifyData = await verifyRes.json();
-                      if (verifyData.isOk) {
-                        // 5. Subtract tokens from availableAmount in backend
-                        if (!user) {
-                          setBuyError("User not found. Please login again.");
-                          return;
-                        }
-                        const buyRes = await fetch("/api/p2p/orders/buy", {
+                      try {
+                        // 4. Verify payment
+                        const verifyRes = await fetch("/api/razorpay/verify", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({
-                            orderId: buyOrder.id,
-                            amount: amountNum,
-                            buyerId: user.id
-                          })
+                            orderCreationId: data.orderId,
+                            razorpayPaymentId: response.razorpay_payment_id,
+                            razorpaySignature: response.razorpay_signature,
+                          }),
                         });
-                        const buyData = await buyRes.json();
-                        if (buyData.success) {
-                          setBuyMessage("Purchase successful!");
-                          // Show transfer details if available
-                          if (buyData.transfer?.txHash) {
-                            setBuyMessage(
-                              `Purchase successful! ${buyData.transfer.type} transferred. Tx Hash: ${buyData.transfer.txHash}`
-                            );
-                          }
+                        const verifyData = await verifyRes.json();
+                        
+                        if (verifyData.isOk) {
+                          // Payment verified successfully
+                          setBuyMessage(
+                            `✅ Payment Successful!\n` +
+                            `Payment ID: ${verifyData.paymentId}\n` +
+                            `Order ID: ${data.orderId}\n` +
+                            `Status: Funds secured in escrow`
+                          );
                           setShowBuyModal(false);
                           setBuyOrder(null);
                           setBuyAmount("");
                           fetchOrders(); // Refresh orders to update available tokens
                         } else {
-                          setBuyError(buyData.error || "Transaction failed");
+                          setBuyError(verifyData.message || "Payment verification failed");
                         }
-                      } else {
-                        setBuyError(verifyData.message || "Payment verification failed");
+                      } catch (verifyErr: any) {
+                        setBuyError(verifyErr.message || "Payment verification error");
+                      }
+                    },
+                    modal: {
+                      ondismiss: function() {
+                        setBuyError("Payment cancelled by user");
                       }
                     },
                     prefill: {
@@ -626,6 +629,9 @@ export default function ExchangePage() {
                   };
                   // @ts-ignore
                   const rzp = new window.Razorpay(options);
+                  rzp.on('payment.failed', function (response: any) {
+                    setBuyError(`Payment failed: ${response.error?.description || 'Unknown error'}`);
+                  });
                   rzp.open();
                 } catch (err: any) {
                   setBuyError(err.message || "Something went wrong");

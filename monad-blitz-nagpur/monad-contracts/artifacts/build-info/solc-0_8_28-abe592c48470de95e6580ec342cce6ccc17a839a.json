@@ -1,0 +1,55 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_28-abe592c48470de95e6580ec342cce6ccc17a839a",
+  "solcVersion": "0.8.28",
+  "solcLongVersion": "0.8.28+commit.7893614a",
+  "userSourceNameMap": {
+    "contracts/Certificate.sol": "project/contracts/Certificate.sol",
+    "contracts/Lock.sol": "project/contracts/Lock.sol",
+    "contracts/MockUSDT.sol": "project/contracts/MockUSDT.sol",
+    "contracts/Payment.sol": "project/contracts/Payment.sol",
+    "contracts/TokenEscrow.sol": "project/contracts/TokenEscrow.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "cancun",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode",
+            "evm.deployedBytecode",
+            "evm.methodIdentifiers",
+            "metadata"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/Certificate.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.28;\n\ncontract Certificate {\n    // Define a certificate structure\n    struct Cert {\n        address issuer;\n        address recipient;\n        string ipfsHash; // Hash of the document stored on IPFS\n        uint256 issuedAt;\n    }\n    \n    // Certificate counter (auto-incremented ID)\n    uint256 public certCount;\n    \n    // Mapping from certificate ID to the certificate details\n    mapping(uint256 => Cert) public certificates;\n    \n    // Event emitted when a new certificate is issued\n    event CertificateIssued(\n        uint256 indexed certId,\n        address indexed issuer,\n        address indexed recipient,\n        string ipfsHash,\n        uint256 issuedAt\n    );\n    \n    /**\n     * @dev Issues a certificate by storing the IPFS hash on-chain.\n     * @param recipient The address of the certificate recipient.\n     * @param ipfsHash The IPFS hash of the document (e.g., image, PDF, text).\n     * @return The certificate ID.\n     */\n    function issueCertificate(address recipient, string calldata ipfsHash) external returns (uint256) {\n        require(recipient != address(0), \"Invalid recipient address\");\n        require(bytes(ipfsHash).length > 0, \"IPFS hash required\");\n        \n        certCount++;\n        \n        certificates[certCount] = Cert({\n            issuer: msg.sender,\n            recipient: recipient,\n            ipfsHash: ipfsHash,\n            issuedAt: block.timestamp\n        });\n        \n        emit CertificateIssued(certCount, msg.sender, recipient, ipfsHash, block.timestamp);\n        return certCount;\n    }\n}\n"
+      },
+      "project/contracts/Lock.sol": {
+        "content": "// SPDX-License-Identifier: UNLICENSED\npragma solidity ^0.8.28;\n\n// Uncomment this line to use console.log\n// import \"hardhat/console.sol\";\n\ncontract Lock {\n    uint public unlockTime;\n    address payable public owner;\n\n    event Withdrawal(uint amount, uint when);\n\n    constructor(uint _unlockTime) payable {\n        require(\n            block.timestamp < _unlockTime,\n            \"Unlock time should be in the future\"\n        );\n\n        unlockTime = _unlockTime;\n        owner = payable(msg.sender);\n    }\n\n    function withdraw() public {\n        // Uncomment this line, and the import of \"hardhat/console.sol\", to print a log in your terminal\n        // console.log(\"Unlock time is %o and block timestamp is %o\", unlockTime, block.timestamp);\n\n        require(block.timestamp >= unlockTime, \"You can't withdraw yet\");\n        require(msg.sender == owner, \"You aren't the owner\");\n\n        emit Withdrawal(address(this).balance, block.timestamp);\n\n        owner.transfer(address(this).balance);\n    }\n}\n"
+      },
+      "project/contracts/MockUSDT.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.28;\n\n/**\n * @title MockUSDT\n * @dev A simple ERC20 token contract for testing on Monad testnet\n * This mimics USDT with 6 decimals\n */\ncontract MockUSDT {\n    string public name = \"Mock Tether USD\";\n    string public symbol = \"USDT\";\n    uint8 public decimals = 6;\n    uint256 public totalSupply;\n\n    mapping(address => uint256) public balanceOf;\n    mapping(address => mapping(address => uint256)) public allowance;\n\n    address public owner;\n\n    event Transfer(address indexed from, address indexed to, uint256 value);\n    event Approval(address indexed owner, address indexed spender, uint256 value);\n\n    constructor() {\n        owner = msg.sender;\n        totalSupply = 1000000000 * 10**decimals; // 1 billion USDT\n        balanceOf[msg.sender] = totalSupply;\n        emit Transfer(address(0), msg.sender, totalSupply);\n    }\n\n    function transfer(address to, uint256 amount) external returns (bool) {\n        require(balanceOf[msg.sender] >= amount, \"Insufficient balance\");\n        balanceOf[msg.sender] -= amount;\n        balanceOf[to] += amount;\n        emit Transfer(msg.sender, to, amount);\n        return true;\n    }\n\n    function transferFrom(address from, address to, uint256 amount) external returns (bool) {\n        require(balanceOf[from] >= amount, \"Insufficient balance\");\n        require(allowance[from][msg.sender] >= amount, \"Insufficient allowance\");\n        \n        balanceOf[from] -= amount;\n        balanceOf[to] += amount;\n        allowance[from][msg.sender] -= amount;\n        \n        emit Transfer(from, to, amount);\n        return true;\n    }\n\n    function approve(address spender, uint256 amount) external returns (bool) {\n        allowance[msg.sender][spender] = amount;\n        emit Approval(msg.sender, spender, amount);\n        return true;\n    }\n\n    // Mint function for testing (owner only)\n    function mint(address to, uint256 amount) external {\n        require(msg.sender == owner, \"Only owner can mint\");\n        totalSupply += amount;\n        balanceOf[to] += amount;\n        emit Transfer(address(0), to, amount);\n    }\n}\n"
+      },
+      "project/contracts/Payment.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\ncontract Payment {\n    event PaymentSent(address indexed sender, address indexed receiver, uint256 amount);\n\n    // Function to send Ether\n    function sendPayment(address payable receiver) external payable {\n        require(msg.value > 0, \"Amount must be greater than zero\");\n        require(receiver != address(0), \"Invalid receiver address\");\n\n    (bool sent, ) = receiver.call{value: msg.value}(\"\");\n    require(sent, \"Failed to send MON\");\n    emit PaymentSent(msg.sender, receiver, msg.value);\n    }\n}\n"
+      },
+      "project/contracts/TokenEscrow.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.28;\n\ninterface IERC20 {\n    function transferFrom(address from, address to, uint256 amount) external returns (bool);\n    function transfer(address to, uint256 amount) external returns (bool);\n}\n\ncontract TokenEscrow {\n    address public owner;\n\n    // adId => seller => token => locked amount\n    mapping(string => mapping(address => mapping(address => uint256))) public lockedByAd;\n    \n    // adId => seller address (for quick lookup)\n    mapping(string => address) public adSeller;\n\n    // Fixed: max 3 indexed parameters per event (Solidity limit)\n    event TokensLocked(string indexed adId, address indexed seller, address indexed token, uint256 amount);\n    event TokensReleased(string indexed adId, address indexed seller, address indexed buyer, address token, uint256 amount);\n\n    constructor() {\n        owner = msg.sender;\n    }\n\n    // User must approve this contract to spend their tokens before calling this\n    // Locks tokens for a specific adId\n    function lockTokens(string memory adId, address token, uint256 amount) external {\n        require(amount > 0, \"Amount must be > 0\");\n        require(bytes(adId).length > 0, \"AdId cannot be empty\");\n        require(IERC20(token).transferFrom(msg.sender, address(this), amount), \"Transfer failed\");\n        \n        lockedByAd[adId][msg.sender][token] += amount;\n        adSeller[adId] = msg.sender; // Store seller for this ad\n        \n        emit TokensLocked(adId, msg.sender, token, amount);\n    }\n\n    // Only owner (platform) can release tokens to buyer after payment confirmation\n    function releaseTokens(string memory adId, address buyer, address token, uint256 amount) external {\n        require(msg.sender == owner, \"Only owner can release\");\n        require(buyer != address(0), \"Invalid buyer address\");\n        require(amount > 0, \"Amount must be > 0\");\n        \n        address seller = adSeller[adId];\n        require(seller != address(0), \"Ad not found\");\n        require(lockedByAd[adId][seller][token] >= amount, \"Insufficient locked\");\n        \n        lockedByAd[adId][seller][token] -= amount;\n        require(IERC20(token).transfer(buyer, amount), \"Release failed\");\n        \n        emit TokensReleased(adId, seller, buyer, token, amount);\n    }\n\n    // Get locked amount for an ad\n    function getLockedAmount(string memory adId, address seller, address token) external view returns (uint256) {\n        return lockedByAd[adId][seller][token];\n    }\n}\n"
+      }
+    }
+  }
+}

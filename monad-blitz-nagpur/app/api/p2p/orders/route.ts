@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
       },
       price: `₹${ad.price.toFixed(2)}`,
       available: `${ad.availableAmount.toFixed(2)} ${ad.cryptocurrency}`,
-      limits: `₹${(ad.price * 0.1).toFixed(2)} - ₹${(ad.price * ad.availableAmount).toFixed(2)}`, // Min 10% of available
+      limits: `₹${(Number(ad.price) * 0.1).toFixed(2)} - ₹${(Number(ad.price) * Number(ad.availableAmount)).toFixed(2)}`, // Min 10% of available
       paymentMethods: ['UPI', 'IMPS', 'Bank Transfer'], // Default payment methods
       timeLimit: '30 min' // Default time limit
     }))

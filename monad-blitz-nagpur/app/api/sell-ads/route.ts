@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { ethers } from 'ethers';
 
-// USDT contract address on Polygon Amoy testnet
-// Note: You'll need to get the actual USDT testnet address
+// USDT contract address on Monad testnet
+// Note: You'll need to get the actual USDT testnet address on Monad
 const USDT_CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_USDT_CONTRACT_ADDRESS || '0x...';
-const ESCROW_CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_ESCROW_CONTRACT_ADDRESS || '0x...';
+// Deployed TokenEscrow contract on Monad testnet
+const ESCROW_CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_ESCROW_CONTRACT_ADDRESS || '0xE3F874e3D0c462351BC525a752Fc7d0e7ad8482B';
 const PRIVATE_KEY = process.env.PRIVATE_KEY; // Server's private key for escrow release
 
 // ERC20 ABI (minimal for USDT)
@@ -23,12 +24,12 @@ const ESCROW_ABI = [
   "function getLockedAmount(string memory adId, address seller, address token) external view returns (uint256)"
 ];
 
-// Get provider for Polygon Amoy
+// Get provider for Monad testnet
 function getProvider() {
-  const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'https://rpc-amoy.polygon.technology/';
+  const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'https://rpc.monad.xyz';
   return new ethers.JsonRpcProvider(rpcUrl, {
-    chainId: 80002,
-    name: 'polygon-amoy'
+    chainId: 10143,
+    name: 'monad-testnet'
   });
 }
 
@@ -87,7 +88,7 @@ export async function GET(request: NextRequest) {
       },
       price: `₹${ad.price.toFixed(2)}`,
       available: `${ad.availableAmount.toFixed(2)} ${ad.cryptocurrency}`,
-      limits: `₹${(ad.price * 0.1).toFixed(2)} - ₹${(ad.price * ad.availableAmount).toFixed(2)}`, // Min 10% of available
+      limits: `₹${(Number(ad.price) * 0.1).toFixed(2)} - ₹${(Number(ad.price) * Number(ad.availableAmount)).toFixed(2)}`, // Min 10% of available
       paymentMethods: ['UPI', 'IMPS', 'Bank Transfer'],
       timeLimit: '30 min'
     }));
